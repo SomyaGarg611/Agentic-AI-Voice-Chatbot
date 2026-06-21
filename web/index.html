@@ -44,9 +44,9 @@
     <!-- Controls -->
     <footer class="controls">
       <div class="upload-area">
-        <label class="upload-btn" title="Upload a document for RAG search">
+        <label class="upload-btn" title="Upload a document (PDF, Word, Excel, PowerPoint, CSV, TXT, MD, HTML)">
           📄
-          <input type="file" id="fileInput" accept=".txt,.md,.pdf" style="display:none" onchange="uploadFile(this)" />
+          <input type="file" id="fileInput" accept=".pdf,.docx,.xlsx,.xlsm,.csv,.tsv,.pptx,.txt,.md,.html,.htm" style="display:none" onchange="uploadFile(this)" />
         </label>
         <span id="docCount" class="doc-badge" style="display:none">0 docs</span>
       </div>

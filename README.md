@@ -44,7 +44,7 @@ FastAPI
 |---|---|
 | **Voice pipeline** | Deepgram Nova-2 streaming STT → Claude agent → ElevenLabs TTS, <2 s first audio |
 | **Agentic tool use** | Web search, URL fetch, document RAG, symbolic calculator — Claude decides which to chain |
-| **RAG** | Upload PDF/TXT/MD; ChromaDB embeds and retrieves with PyMuPDF for clean PDF extraction |
+| **RAG** | Upload PDF, Word, Excel, PowerPoint, CSV, TXT, MD, or HTML; recursive token-aware chunking tuned to the embedder, tables chunked row-wise with headers preserved |
 | **Long-term memory** | Per-turn summaries stored in ChromaDB; top-k relevant memories retrieved and injected on every turn |
 | **Barge-in** | User can interrupt mid-response; server cancels task and browser stops audio instantly |
 | **Sentence streaming** | TTS synthesised sentence-by-sentence — browser starts playing before generation finishes |
@@ -65,7 +65,8 @@ FastAPI
 | Web search | Tavily |
 | URL extraction | httpx + trafilatura |
 | Vector store / RAG | ChromaDB (embedded, local ONNX embeddings) |
-| PDF extraction | PyMuPDF (fitz) |
+| Document parsing | PyMuPDF (PDF), python-docx (Word), openpyxl (Excel), python-pptx (PowerPoint), trafilatura (HTML) |
+| Chunking | Recursive, structure-aware, token-aware (tiktoken) splitter |
 | Memory | SQLite (aiosqlite) + ChromaDB |
 | Tracing | Langfuse 4.x |
 | Calculator | sympy |
@@ -90,7 +91,9 @@ VoiceBot/
 │   │       └── calculator.py    # sympy safe evaluator
 │   ├── rag/
 │   │   ├── store.py             # ChromaDB client + query
-│   │   └── ingest.py            # PDF/TXT/MD chunking + indexing
+│   │   ├── extract.py           # Multi-format extraction (PDF/DOCX/XLSX/PPTX/CSV/HTML)
+│   │   ├── splitter.py          # Recursive token-aware text splitter
+│   │   └── ingest.py            # Orchestrates extract → split → index
 │   ├── memory/
 │   │   └── longterm.py          # Cross-session memory (SQLite + ChromaDB)
 │   ├── voice/
@@ -169,7 +172,7 @@ All keys have **free tiers** sufficient for development and demos.
 |---|---|
 | **Voice query** | Click the 🎤 mic button (wait for "Ready" status), then speak |
 | **Text query** | Type in the input box and press Enter |
-| **Upload a document** | Click 📄, choose a PDF/TXT/MD file — then ask questions about it |
+| **Upload a document** | Click 📄, choose a PDF, Word, Excel, PowerPoint, CSV, TXT, MD or HTML file — then ask about it |
 | **Stop mid-response** | Click the red ⏹ stop button or press **Escape** |
 | **Interrupt** | Just speak while Aria is responding — she stops and answers your new question |
 
@@ -204,7 +207,7 @@ This project was built to showcase real AI engineering skills:
 | Skill | Where |
 |---|---|
 | **Agentic tool orchestration** | Multi-step Claude tool-calling loop with 4 tools, retry logic, citation extraction |
-| **Retrieval-Augmented Generation** | ChromaDB vector store, PyMuPDF extraction, overlapping fixed-window chunking, cosine relevance scoring |
+| **Retrieval-Augmented Generation** | Multi-format extraction (PDF/Word/Excel/PPT/CSV/HTML), recursive token-aware chunking tuned to the embedder window, row-wise table chunking, cosine relevance scoring |
 | **Long-term memory** | Cross-session summarise-and-retrieve pattern (SQLite + vector store) |
 | **Real-time voice pipeline** | AudioWorklet PCM capture → Deepgram streaming STT → sentence-chunked TTS |
 | **Barge-in / interruption** | asyncio task cancellation + browser AudioBufferSourceNode stop |
