@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aria — AI Research Analyst</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <div class="logo-icon">🔬</div>
+        <div>
+          <h1>Aria</h1>
+          <p>AI Research Analyst</p>
+        </div>
+      </div>
+      <div class="status-bar">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">Connecting…</span>
+      </div>
+    </header>
+
+    <!-- Chat Area -->
+    <main class="chat-area" id="chatArea">
+      <div class="welcome-msg" id="welcomeMsg">
+        <h2>Ask me anything</h2>
+        <p>I can search the web, read documents, do calculations, and remember our conversations.</p>
+        <div class="examples">
+          <button class="example-chip" onclick="sendTextQuery(this.textContent)">What's the latest on AI regulation?</button>
+          <button class="example-chip" onclick="sendTextQuery(this.textContent)">Explain quantum computing simply</button>
+          <button class="example-chip" onclick="sendTextQuery(this.textContent)">What's 2.5 million divided by 7?</button>
+        </div>
+      </div>
+    </main>
+
+    <!-- Live transcript bar -->
+    <div class="transcript-bar" id="transcriptBar">
+      <span id="liveTranscript"></span>
+    </div>
+
+    <!-- Controls -->
+    <footer class="controls">
+      <div class="upload-area">
+        <label class="upload-btn" title="Upload a document for RAG search">
+          📄
+          <input type="file" id="fileInput" accept=".txt,.md,.pdf" style="display:none" onchange="uploadFile(this)" />
+        </label>
+        <span id="docCount" class="doc-badge" style="display:none">0 docs</span>
+      </div>
+
+      <button class="stop-btn" id="stopBtn" onclick="stopAgent()" title="Stop speaking (Esc)" style="display:none">
+        <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+      </button>
+
+      <button class="mic-btn" id="micBtn" onclick="toggleMic()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path id="micIcon" d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+          <line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+      </button>
+
+      <div class="text-input-area">
+        <input type="text" id="textInput" placeholder="Or type a question…" onkeydown="if(event.key==='Enter') sendTyped()" />
+        <button onclick="sendTyped()">→</button>
+      </div>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+{"id": "e1", "question": "What is the current population of Earth?", "required_tools": ["web_search"], "must_contain": ["billion"], "rubric": "Answer should mention approximately 8 billion with a source citation."}
+{"id": "e2", "question": "What is the square root of 17161?", "required_tools": ["calculator"], "must_contain": ["131"], "rubric": "Should use calculator tool and return exactly 131."}
+{"id": "e3", "question": "Who is the CEO of Anthropic and what did they found before that?", "required_tools": ["web_search"], "must_contain": ["Dario", "Anthropic"], "rubric": "Should mention Dario Amodei and his role at OpenAI before Anthropic."}
+{"id": "e4", "question": "If I invest $10000 at 7% annual return for 20 years, what is the final amount?", "required_tools": ["calculator"], "must_contain": ["38"], "rubric": "Should calculate compound interest: 10000 * 1.07^20 ≈ $38,696."}
+{"id": "e5", "question": "Summarize the main findings of the latest IPCC climate report.", "required_tools": ["web_search"], "must_contain": ["climate", "warming"], "rubric": "Should search for IPCC report and cite a source URL."}

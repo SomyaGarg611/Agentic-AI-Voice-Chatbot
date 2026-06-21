@@ -1,0 +1,8 @@
+# Replace your-subdomain.duckdns.org with your actual domain
+your-subdomain.duckdns.org {
+    reverse_proxy voicebot:8000 {
+        # Enable WebSocket proxying
+        header_up Host {host}
+        header_up X-Real-IP {remote}
+    }
+}

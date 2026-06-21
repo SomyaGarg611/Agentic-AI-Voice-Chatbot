@@ -1,0 +1,13 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+chroma_db/
+memory.db
+uploads/
+*.pdf
+*.log
+dist/
+.DS_Store
+evals/results.jsonl
