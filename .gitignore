@@ -8,6 +8,11 @@ memory.db
 uploads/
 *.pdf
 *.log
-dist/
+/dist/
 .DS_Store
 evals/results.jsonl
+
+# Frontend (commit frontend/dist so the app runs without a Node build)
+frontend/node_modules/
+node_modules/
+npm-debug.log*

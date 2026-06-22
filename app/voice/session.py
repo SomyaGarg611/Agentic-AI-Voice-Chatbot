@@ -8,9 +8,9 @@ from typing import Optional
 from fastapi import WebSocket
 
 from app.config import settings
-from app.agent.loop import run_agent
+from app.agent.loop import run_agent_streaming
 from app.voice.deepgram_stt import DeepgramSTT
-from app.voice.elevenlabs_tts import stream_tts
+from app.voice.elevenlabs_tts import synthesize_sentence, clean_for_tts
 from app.memory.longterm import store_turn, retrieve_relevant, get_recent_turns
 from app.observability.tracing import flush
 
@@ -144,33 +144,43 @@ class VoiceSession:
                     f"User: {t['user']}\nAria: {t['agent']}" for t in recent
                 )
 
-            response_text, updated_history = await run_agent(
+            started = {"audio": False}
+
+            async def on_tool(name: str):
+                with contextlib.suppress(Exception):
+                    await self.ws.send_json({"type": "tool_use", "tool": name})
+
+            async def on_sentence(text: str):
+                # Stream the sentence to the UI immediately…
+                await self.ws.send_json({"type": "agent_delta", "text": text + " "})
+                # …then synthesize and stream its audio (overlaps with generation)
+                if settings.has_elevenlabs:
+                    spoken = clean_for_tts(text)
+                    if spoken.strip():
+                        if not started["audio"]:
+                            await self.ws.send_json({"type": "audio_start"})
+                            started["audio"] = True
+                        audio = await synthesize_sentence(spoken)
+                        if audio:
+                            await self.ws.send_bytes(audio)
+
+            response_text, updated_history = await run_agent_streaming(
                 user_text,
                 self.conversation_history,
                 memory_context=memory_context,
                 session_id=self.session_id,
+                on_tool=on_tool,
+                on_sentence=on_sentence,
             )
 
             self.conversation_history = updated_history[-20:]
 
+            await self.ws.send_json({"type": "audio_end"})
             await self.ws.send_json({
-                "type": "agent_response",
+                "type": "agent_done",
                 "text": response_text,
                 "has_audio": settings.has_elevenlabs and bool(response_text),
             })
-
-            if settings.has_elevenlabs and response_text:
-                await self.ws.send_json({"type": "audio_start"})
-                async for sentence, audio_bytes in stream_tts(response_text):
-                    # Yield to the event loop — lets a cancellation come through
-                    await asyncio.sleep(0)
-                    if audio_bytes:
-                        await self.ws.send_json({"type": "sentence_start", "text": sentence})
-                        await self.ws.send_bytes(audio_bytes)
-                        await self.ws.send_json({"type": "sentence_end"})
-                await self.ws.send_json({"type": "audio_end"})
-            else:
-                await self.ws.send_json({"type": "audio_end"})
 
             await store_turn(self.session_id, user_text, response_text)
 

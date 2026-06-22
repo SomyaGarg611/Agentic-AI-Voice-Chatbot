@@ -70,7 +70,7 @@ FastAPI
 | Memory | SQLite (aiosqlite) + ChromaDB |
 | Tracing | Langfuse 4.x |
 | Calculator | sympy |
-| Frontend | Vanilla HTML/CSS/JS, AudioWorklet, Web Audio API |
+| Frontend | React + Vite, AudioWorklet, Web Audio API (state-reactive voice orb UI) |
 
 ---
 
@@ -102,11 +102,14 @@ VoiceBot/
 │   │   └── elevenlabs_tts.py    # ElevenLabs streaming + markdown cleaner
 │   └── observability/
 │       └── tracing.py           # Langfuse 4.x context-manager tracing
-├── web/
-│   ├── index.html               # Single-page UI
-│   ├── app.js                   # WebSocket client, AudioWorklet, PCM playback
-│   ├── styles.css               # Dark theme
-│   └── pcm-processor.js         # AudioWorklet processor (mic → PCM-16)
+├── frontend/                    # React + Vite UI (built to frontend/dist)
+│   ├── src/
+│   │   ├── App.jsx              # Layout: topbar, thread, orb, composer
+│   │   ├── useVoiceSession.js   # WebSocket + audio pipeline hook
+│   │   └── components/          # VoiceOrb, Message, Composer, Toasts
+│   ├── public/pcm-processor.js  # AudioWorklet processor (mic → PCM-16)
+│   └── dist/                    # Built static assets (served by FastAPI)
+├── web/                         # Legacy vanilla UI (no-build fallback)
 ├── evals/
 │   ├── dataset.jsonl            # Research Q&A eval cases
 │   └── run_evals.py             # LLM-as-judge eval harness
@@ -147,6 +150,10 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 Open **http://localhost:8000** in Chrome (required for mic access on localhost).
+
+> The React UI ships pre-built in `frontend/dist`, so no Node is needed to run.
+> To modify the UI: `cd frontend && npm install && npm run dev` (hot-reload dev
+> server with API proxy), or `npm run build` to regenerate the production bundle.
 
 ---
 

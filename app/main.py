@@ -79,4 +79,7 @@ async def health():
 
 
 # ── Static web frontend ─────────────────────────────────────────────────────
-app.mount("/", StaticFiles(directory="web", html=True), name="web")
+# Serve the built React app (frontend/dist) when present; fall back to the
+# legacy vanilla UI in web/ otherwise.
+_FRONTEND_DIR = "frontend/dist" if os.path.isdir("frontend/dist") else "web"
+app.mount("/", StaticFiles(directory=_FRONTEND_DIR, html=True), name="web")

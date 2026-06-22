@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Any, Optional
 import anthropic
 
@@ -114,3 +115,99 @@ async def run_agent(
         final = " ".join(b.text for b in response.content if hasattr(b, "text")).strip()
         messages.append({"role": "assistant", "content": response.content})
         return final, messages
+
+
+# ── Streaming variant (used by the live voice session) ──────────────────────
+
+# Emit a sentence only once its terminal punctuation is followed by whitespace,
+# so mid-stream decimals ("2.5") and abbreviations aren't split prematurely.
+_SENTENCE_RE = re.compile(r"[^.!?]*[.!?]+(?=\s)")
+
+
+def _extract_sentences(buf: str):
+    """Return (complete_sentences, remainder) from a growing text buffer."""
+    sentences, last = [], 0
+    for m in _SENTENCE_RE.finditer(buf):
+        s = m.group().strip()
+        if s:
+            sentences.append(s)
+        last = m.end()
+    return sentences, buf[last:]
+
+
+async def run_agent_streaming(
+    user_message: str,
+    conversation_history: list,
+    memory_context: str = "",
+    session_id: str = None,
+    on_tool=None,       # async callback(tool_name)
+    on_sentence=None,   # async callback(sentence_text) — fired as the answer streams
+) -> tuple[str, list]:
+    """
+    Same agentic loop as run_agent, but streams the model output. Each completed
+    sentence of the answer is handed to on_sentence as soon as it's generated, so
+    the session can display it and synthesize speech while the rest is still being
+    written — collapsing time-to-first-audio.
+    """
+    lf = get_langfuse()
+    with lf.start_as_current_observation(
+        name="voice_turn_stream", as_type="agent",
+        input={"user": user_message, "session_id": session_id},
+    ):
+        system = SYSTEM_PROMPT
+        if memory_context:
+            system += f"\n\n## Relevant past conversations\n{memory_context}"
+
+        messages = list(conversation_history) + [{"role": "user", "content": user_message}]
+
+        for _ in range(8):
+            buf, round_text = "", ""
+            async with _get_client().messages.stream(
+                model=settings.claude_model, max_tokens=1024,
+                system=system, tools=TOOLS, messages=messages,
+            ) as stream:
+                async for event in stream:
+                    if (event.type == "content_block_delta"
+                            and getattr(event.delta, "type", None) == "text_delta"):
+                        chunk = event.delta.text
+                        round_text += chunk
+                        buf += chunk
+                        sentences, buf = _extract_sentences(buf)
+                        for s in sentences:
+                            if on_sentence:
+                                await on_sentence(s)
+                final = await stream.get_final_message()
+
+            if buf.strip() and on_sentence:   # flush trailing partial sentence
+                await on_sentence(buf.strip())
+
+            tool_uses = [b for b in final.content if b.type == "tool_use"]
+            messages.append({"role": "assistant", "content": final.content})
+
+            if final.stop_reason == "end_turn" or not tool_uses:
+                lf.update_current_span(output={"response": round_text[:400]})
+                return round_text.strip(), messages
+
+            tool_results = []
+            for tu in tool_uses:
+                if on_tool:
+                    try:
+                        await on_tool(tu.name)
+                    except Exception:
+                        pass
+                result = await _execute_tool(tu.name, tu.input)
+                tool_results.append({
+                    "type": "tool_result", "tool_use_id": tu.id,
+                    "content": json.dumps(result, ensure_ascii=False),
+                })
+            messages.append({"role": "user", "content": tool_results})
+
+        # Safety fallback
+        resp = await _get_client().messages.create(
+            model=settings.claude_model, max_tokens=512, system=system, messages=messages,
+        )
+        answer = " ".join(b.text for b in resp.content if hasattr(b, "text")).strip()
+        if answer and on_sentence:
+            await on_sentence(answer)
+        messages.append({"role": "assistant", "content": resp.content})
+        return answer, messages
