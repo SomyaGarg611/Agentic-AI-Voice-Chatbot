@@ -61,7 +61,92 @@ body {
   padding: 16px 22px;
   border-bottom: 1px solid var(--line);
 }
-.brand { display: flex; align-items: baseline; gap: 9px; }
+.brand { display: flex; align-items: center; gap: 9px; }
+.topbar__right { display: flex; align-items: center; gap: 10px; }
+
+.iconbtn {
+  width: 32px; height: 32px; border-radius: 9px;
+  display: grid; place-items: center;
+  background: var(--surface2); border: 1px solid var(--line);
+  color: var(--muted); cursor: pointer;
+  transition: color .15s var(--ease), border-color .15s var(--ease), transform .12s var(--ease);
+}
+.iconbtn svg { width: 17px; height: 17px; }
+.iconbtn:hover { color: var(--text); border-color: var(--line-2); }
+.iconbtn:active { transform: scale(.92); }
+
+/* ── Sidebar (chat history) ─────────────────────────────────────── */
+.scrim {
+  position: fixed; inset: 0; z-index: 40;
+  background: rgba(0,0,0,0.5);
+  opacity: 0; pointer-events: none;
+  transition: opacity .25s var(--ease);
+  backdrop-filter: blur(2px);
+}
+.scrim--on { opacity: 1; pointer-events: auto; }
+
+.sidebar {
+  position: fixed; top: 0; left: 0; bottom: 0; z-index: 41;
+  width: 300px; max-width: 84vw;
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  display: flex; flex-direction: column;
+  transform: translateX(-104%);
+  transition: transform .28s var(--ease);
+  padding: 14px;
+}
+.sidebar--on { transform: none; box-shadow: 0 0 60px rgba(0,0,0,.5); }
+
+.sidebar__head { display: flex; align-items: center; justify-content: space-between; padding: 4px 4px 12px; }
+.sidebar__title { font-family: var(--font-display); font-weight: 600; font-size: 15px; }
+.sidebar__close {
+  width: 28px; height: 28px; border-radius: 8px; cursor: pointer;
+  background: none; border: 1px solid var(--line); color: var(--muted);
+  display: grid; place-items: center;
+}
+.sidebar__close svg { width: 14px; height: 14px; }
+.sidebar__close:hover { color: var(--text); border-color: var(--line-2); }
+
+.newchat {
+  display: flex; align-items: center; gap: 8px; justify-content: center;
+  width: 100%; padding: 10px;
+  background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--think) 40%, var(--line));
+  color: var(--text); border-radius: var(--r);
+  font-family: var(--font-body); font-size: 14px; font-weight: 500; cursor: pointer;
+  transition: background .15s var(--ease), transform .12s var(--ease);
+}
+.newchat svg { width: 15px; height: 15px; color: var(--think); }
+.newchat:hover { background: color-mix(in srgb, var(--think) 22%, transparent); }
+.newchat:active { transform: scale(.99); }
+
+.sidebar__list { flex: 1; overflow-y: auto; margin-top: 12px; display: flex; flex-direction: column; gap: 4px; }
+.sidebar__list::-webkit-scrollbar { width: 3px; }
+.sidebar__list::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 3px; }
+.sidebar__empty { color: var(--faint); font-size: 13px; padding: 10px 6px; }
+
+.chatitem {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 10px; border-radius: 10px; cursor: pointer;
+  border: 1px solid transparent;
+  transition: background .14s var(--ease), border-color .14s var(--ease);
+}
+.chatitem:hover { background: var(--surface2); }
+.chatitem--active { background: var(--surface2); border-color: var(--line-2); }
+.chatitem__body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.chatitem__title {
+  font-size: 13.5px; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.chatitem__meta { font-family: var(--font-mono); font-size: 10.5px; color: var(--faint); }
+.chatitem__del {
+  flex-shrink: 0; width: 26px; height: 26px; border-radius: 7px;
+  background: none; border: none; color: var(--faint); cursor: pointer;
+  display: grid; place-items: center; opacity: 0;
+  transition: opacity .14s, color .14s, background .14s;
+}
+.chatitem__del svg { width: 14px; height: 14px; }
+.chatitem:hover .chatitem__del { opacity: 1; }
+.chatitem__del:hover { color: var(--danger); background: rgba(244,115,123,0.12); }
 .brand__mark {
   width: 11px; height: 11px; border-radius: 3px;
   align-self: center;

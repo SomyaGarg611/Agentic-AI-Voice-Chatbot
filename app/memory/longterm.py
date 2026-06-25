@@ -80,3 +80,73 @@ async def get_recent_turns(session_id: str, limit: int = 5) -> List[dict]:
     ) as cursor:
         rows = await cursor.fetchall()
     return [{"user": r[0], "agent": r[1]} for r in reversed(rows)]
+
+
+# ── Chat management (multi-conversation history) ────────────────────────────
+
+async def list_chats() -> List[dict]:
+    """All chats that have at least one turn, most recently active first."""
+    db = await get_db()
+    async with db.execute("""
+        SELECT s.id,
+               (SELECT user_text FROM turns t1 WHERE t1.session_id = s.id ORDER BY t1.id ASC LIMIT 1),
+               (SELECT MAX(created_at) FROM turns t2 WHERE t2.session_id = s.id),
+               (SELECT COUNT(*) FROM turns t3 WHERE t3.session_id = s.id)
+        FROM sessions s
+        WHERE EXISTS (SELECT 1 FROM turns t WHERE t.session_id = s.id)
+        ORDER BY 3 DESC
+    """) as cursor:
+        rows = await cursor.fetchall()
+    chats = []
+    for sid, title, updated_at, count in rows:
+        t = (title or "New chat").strip()
+        chats.append({
+            "id": sid,
+            "title": (t[:48] + "…") if len(t) > 48 else t,
+            "updated_at": updated_at,
+            "turns": count,
+        })
+    return chats
+
+
+async def get_chat_messages(session_id: str) -> List[dict]:
+    """Full message list for the UI when opening a past chat."""
+    db = await get_db()
+    async with db.execute(
+        "SELECT user_text, agent_text FROM turns WHERE session_id = ? ORDER BY id ASC",
+        (session_id,),
+    ) as cursor:
+        rows = await cursor.fetchall()
+    messages = []
+    for user_text, agent_text in rows:
+        messages.append({"role": "user", "text": user_text})
+        messages.append({"role": "agent", "text": agent_text})
+    return messages
+
+
+async def load_history(session_id: str, max_turns: int = 10) -> list:
+    """Rebuild the agent's conversation_history (role/content) from stored turns."""
+    db = await get_db()
+    async with db.execute(
+        "SELECT user_text, agent_text FROM turns WHERE session_id = ? ORDER BY id DESC LIMIT ?",
+        (session_id, max_turns),
+    ) as cursor:
+        rows = await cursor.fetchall()
+    history = []
+    for user_text, agent_text in reversed(rows):
+        history.append({"role": "user", "content": user_text})
+        history.append({"role": "assistant", "content": agent_text})
+    return history
+
+
+async def delete_chat(session_id: str):
+    db = await get_db()
+    await db.execute("DELETE FROM turns WHERE session_id = ?", (session_id,))
+    await db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+    await db.commit()
+    # Best-effort: drop this chat's semantic memories from ChromaDB too
+    try:
+        from app.rag.store import get_store
+        get_store()._col.delete(where={"source": f"memory:{session_id}"})
+    except Exception:
+        pass

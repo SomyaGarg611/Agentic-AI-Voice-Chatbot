@@ -31,9 +31,12 @@ export function useVoiceSession() {
   const [sttProvider, setSttProvider] = useState('browser')
   const [docCount, setDocCount] = useState(0)
   const [toasts, setToasts] = useState([])
+  const [chats, setChats] = useState([])
+  const [activeChatId, setActiveChatId] = useState(null)
 
   // refs (mutable, non-rendering)
   const ws = useRef(null)
+  const activeChatRef = useRef(null)
   const audioCtx = useRef(null)
   const workletNode = useRef(null)
   const mediaStream = useRef(null)
@@ -60,14 +63,83 @@ export function useVoiceSession() {
     } catch {}
   }, [])
 
+  // ── Chat history ──────────────────────────────────────────────────
+  const newId = () =>
+    (crypto.randomUUID ? crypto.randomUUID() : 'c-' + Date.now() + '-' + Math.round(performance.now()))
+
+  const sendSession = useCallback((id) => {
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({ type: 'session', session_id: id }))
+    }
+  }, [])
+
+  const loadChats = useCallback(async () => {
+    try {
+      const r = await fetch('/api/chats')
+      const j = await r.json()
+      setChats(j.chats || [])
+    } catch {}
+  }, [])
+
+  const newChat = useCallback(() => {
+    const id = newId()
+    activeChatRef.current = id
+    setActiveChatId(id)
+    setMessages([])
+    pendingId.current = null
+    liveId.current = null
+    setTranscript('')
+    sendSession(id)
+  }, [sendSession])
+
+  const openChat = useCallback(async (id) => {
+    try {
+      const r = await fetch(`/api/chats/${id}`)
+      const j = await r.json()
+      const msgs = (j.messages || []).map((m, i) => ({ id: `h${i}`, role: m.role, text: m.text }))
+      activeChatRef.current = id
+      setActiveChatId(id)
+      pendingId.current = null
+      liveId.current = null
+      setMessages(msgs)
+      setTranscript('')
+      sendSession(id)
+    } catch {}
+  }, [sendSession])
+
+  const deleteChat = useCallback(async (id) => {
+    try {
+      await fetch(`/api/chats/${id}`, { method: 'DELETE' })
+      await loadChats()
+      if (id === activeChatRef.current) newChat()
+    } catch {}
+  }, [loadChats, newChat])
+
   // ── Audio playback ────────────────────────────────────────────────
   const getAudioCtx = useCallback(() => {
     if (!audioCtx.current || audioCtx.current.state === 'closed') {
-      audioCtx.current = new AudioContext({ sampleRate: SAMPLE_RATE })
+      // Safari only exposes webkitAudioContext. Use device-native sample rate
+      // (forcing 16 kHz can output silence); 16 kHz PCM is resampled on playback.
+      const AC = window.AudioContext || window.webkitAudioContext
+      audioCtx.current = new AC()
       nextPlayTime.current = 0
     }
     return audioCtx.current
   }, [])
+
+  // Safari/iOS unlock: must play a real (silent) buffer inside a user gesture,
+  // resume() alone isn't enough.
+  const primeAudio = useCallback(() => {
+    const ctx = getAudioCtx()
+    try {
+      const b = ctx.createBuffer(1, 1, 22050)
+      const s = ctx.createBufferSource()
+      s.buffer = b
+      s.connect(ctx.destination)
+      s.start(0)
+    } catch {}
+    if (ctx.state !== 'running') ctx.resume().catch(() => {})
+  }, [getAudioCtx])
 
   const stopAllAudio = useCallback(() => {
     activeSources.current.forEach((s) => { try { s.stop(); s.disconnect() } catch {} })
@@ -83,24 +155,31 @@ export function useVoiceSession() {
   }, [])
 
   const playChunk = useCallback((buf) => {
-    if (!buf || buf.byteLength === 0) return
-    const ctx = getAudioCtx()
-    const i16 = new Int16Array(buf)
-    const f32 = new Float32Array(i16.length)
-    for (let i = 0; i < i16.length; i++) f32[i] = i16[i] / 32768
-    const audioBuf = ctx.createBuffer(1, f32.length, SAMPLE_RATE)
-    audioBuf.getChannelData(0).set(f32)
-    const src = ctx.createBufferSource()
-    src.buffer = audioBuf
-    src.connect(ctx.destination)
-    activeSources.current.push(src)
-    src.onended = () => {
-      activeSources.current = activeSources.current.filter((s) => s !== src)
-      checkPlaybackDone()
+    try {
+      if (!buf || buf.byteLength < 2) return
+      const ctx = getAudioCtx()
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {})
+      // PCM-16 needs an even byte length; drop a stray trailing byte if a chunk split a sample
+      const usable = buf.byteLength - (buf.byteLength % 2)
+      const i16 = new Int16Array(buf, 0, usable / 2)
+      const f32 = new Float32Array(i16.length)
+      for (let i = 0; i < i16.length; i++) f32[i] = i16[i] / 32768
+      const audioBuf = ctx.createBuffer(1, f32.length, SAMPLE_RATE)
+      audioBuf.getChannelData(0).set(f32)
+      const src = ctx.createBufferSource()
+      src.buffer = audioBuf
+      src.connect(ctx.destination)
+      activeSources.current.push(src)
+      src.onended = () => {
+        activeSources.current = activeSources.current.filter((s) => s !== src)
+        checkPlaybackDone()
+      }
+      const startAt = Math.max(ctx.currentTime + 0.01, nextPlayTime.current)
+      src.start(startAt)
+      nextPlayTime.current = startAt + audioBuf.duration
+    } catch {
+      /* skip a bad chunk rather than break the stream */
     }
-    const startAt = Math.max(ctx.currentTime + 0.01, nextPlayTime.current)
-    src.start(startAt)
-    nextPlayTime.current = startAt + audioBuf.duration
   }, [getAudioCtx, checkPlaybackDone])
 
   const speakBrowser = useCallback((text) => {
@@ -137,12 +216,13 @@ export function useVoiceSession() {
   const appendLive = useCallback((text) => {
     if (!liveId.current) {
       const id = 'live-' + (++toastId)
+      const pid = pendingId.current   // capture BEFORE nulling — the updater runs later
       liveId.current = id
+      pendingId.current = null
       setMessages((m) => {
-        const cleared = pendingId.current ? m.filter((x) => x.id !== pendingId.current) : m
+        const cleared = pid ? m.filter((x) => x.id !== pid) : m
         return [...cleared, { id, role: 'agent', text }]
       })
-      pendingId.current = null
     } else {
       const id = liveId.current
       setMessages((m) => m.map((x) => (x.id === id ? { ...x, text: x.text + text } : x)))
@@ -164,6 +244,8 @@ export function useVoiceSession() {
         case 'stt_ready':
           providerRef.current = msg.provider
           setSttProvider(msg.provider)
+          // Tell the server which chat we're on (resumed or new)
+          if (activeChatRef.current) sendSession(activeChatRef.current)
           setPhase(STATE.IDLE)
           setStatusText('Ready')
           break
@@ -191,6 +273,7 @@ export function useVoiceSession() {
         case 'agent_done':
           if (!msg.has_audio && msg.text) speakBrowser(msg.text)
           liveId.current = null
+          loadChats()   // a new/updated chat now exists in history
           break
         case 'audio_start':
           stopAllAudio()
@@ -200,6 +283,9 @@ export function useVoiceSession() {
         case 'audio_end':
           processingRef.current = false
           checkPlaybackDone()
+          break
+        case 'notice':
+          addToast('info', msg.message)
           break
         case 'interrupt':
           stopAllAudio()
@@ -229,12 +315,25 @@ export function useVoiceSession() {
       setStatusText('Disconnected')
       setTimeout(connect, 3000)
     }
-  }, [playChunk, pushMessage, showPending, updatePending, removePending, appendLive, speakBrowser, stopAllAudio, checkPlaybackDone])
+  }, [playChunk, pushMessage, showPending, updatePending, removePending, appendLive, speakBrowser, stopAllAudio, checkPlaybackDone, addToast, sendSession, loadChats])
 
   useEffect(() => {
+    // Start on a fresh chat; load history list for the sidebar
+    const id = newId()
+    activeChatRef.current = id
+    setActiveChatId(id)
+    loadChats()
     connect()
     refreshDocCount()
-    return () => { try { ws.current?.close() } catch {} }
+    // Unlock audio playback on the first user interaction anywhere on the page
+    const unlock = () => primeAudio()
+    window.addEventListener('pointerdown', unlock)
+    window.addEventListener('keydown', unlock)
+    return () => {
+      try { ws.current?.close() } catch {}
+      window.removeEventListener('pointerdown', unlock)
+      window.removeEventListener('keydown', unlock)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -313,21 +412,28 @@ export function useVoiceSession() {
     setStatusText(processingRef.current ? 'Thinking' : 'Ready')
   }, [])
 
+  // Create + unlock the AudioContext while we're inside a real user gesture,
+  // so TTS playback isn't stuck in the browser's suspended state.
+  const unlockAudio = useCallback(() => {
+    primeAudio()
+  }, [primeAudio])
+
   const toggleMic = useCallback(async () => {
     if (!ws.current || ws.current.readyState !== WebSocket.OPEN) return
-    if (audioCtx.current?.state === 'suspended') await audioCtx.current.resume()
+    unlockAudio()
     if (listeningRef.current) stopMic()
     else await startMic()
-  }, [startMic, stopMic])
+  }, [startMic, stopMic, unlockAudio])
 
   // ── Text + upload + stop ─────────────────────────────────────────
   const sendText = useCallback((text) => {
     const t = text.trim()
     if (!t || processingRef.current) return
     if (ws.current?.readyState !== WebSocket.OPEN) return
+    unlockAudio()   // we're in a click/Enter gesture — unlock playback now
     pushMessage('user', t)
     ws.current.send(JSON.stringify({ type: 'transcript', text: t }))
-  }, [pushMessage])
+  }, [pushMessage, unlockAudio])
 
   const uploadFile = useCallback(async (file) => {
     if (!file) return
@@ -369,6 +475,7 @@ export function useVoiceSession() {
   return {
     phase, statusText, messages, transcript, isListening, isBusy,
     sttProvider, docCount, toasts,
+    chats, activeChatId, loadChats, newChat, openChat, deleteChat,
     toggleMic, sendText, uploadFile, stopAgent,
   }
 }

@@ -64,6 +64,27 @@ async def rag_stats():
     return {"doc_chunks": get_store().count()}
 
 
+# ── Chat history ──────────────────────────────────────────────────────────────
+
+@app.get("/api/chats")
+async def list_chats_endpoint():
+    from app.memory.longterm import list_chats
+    return {"chats": await list_chats()}
+
+
+@app.get("/api/chats/{session_id}")
+async def get_chat_endpoint(session_id: str):
+    from app.memory.longterm import get_chat_messages
+    return {"messages": await get_chat_messages(session_id)}
+
+
+@app.delete("/api/chats/{session_id}")
+async def delete_chat_endpoint(session_id: str):
+    from app.memory.longterm import delete_chat
+    await delete_chat(session_id)
+    return {"deleted": session_id}
+
+
 # ── Health check ────────────────────────────────────────────────────────────
 
 @app.get("/api/health")

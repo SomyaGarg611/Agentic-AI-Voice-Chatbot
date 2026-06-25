@@ -1,9 +1,10 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useVoiceSession, STATE } from './useVoiceSession'
 import VoiceOrb from './components/VoiceOrb'
 import Message from './components/Message'
 import Composer from './components/Composer'
 import Toasts from './components/Toasts'
+import Sidebar from './components/Sidebar'
 
 const SUGGESTIONS = [
   "What's the latest on AI regulation?",
@@ -14,6 +15,7 @@ const SUGGESTIONS = [
 export default function App() {
   const s = useVoiceSession()
   const scrollRef = useRef(null)
+  const [navOpen, setNavOpen] = useState(false)
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
@@ -22,17 +24,37 @@ export default function App() {
   const empty = s.messages.length === 0
   const connecting = s.phase === STATE.CONNECTING
 
+  const openHistory = () => { s.loadChats(); setNavOpen(true) }
+
   return (
     <div className="app">
+      <Sidebar
+        open={navOpen}
+        chats={s.chats}
+        activeChatId={s.activeChatId}
+        onClose={() => setNavOpen(false)}
+        onNew={() => { s.newChat(); setNavOpen(false) }}
+        onOpen={(id) => { s.openChat(id); setNavOpen(false) }}
+        onDelete={s.deleteChat}
+      />
+
       <header className="topbar">
         <div className="brand">
+          <button className="iconbtn" onClick={openHistory} aria-label="Chat history" title="Chat history">
+            <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M3 5h12M3 9h12M3 13h12" strokeLinecap="round" /></svg>
+          </button>
           <span className="brand__mark" aria-hidden="true" />
           <span className="brand__name">Aria</span>
           <span className="brand__role">Research Analyst</span>
         </div>
-        <div className={`pill pill--${s.phase}`}>
-          <span className="pill__dot" />
-          <span className="pill__text">{s.statusText}</span>
+        <div className="topbar__right">
+          <button className="iconbtn" onClick={() => s.newChat()} aria-label="New chat" title="New chat">
+            <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M9 4v10M4 9h10" strokeLinecap="round" /></svg>
+          </button>
+          <div className={`pill pill--${s.phase}`}>
+            <span className="pill__dot" />
+            <span className="pill__text">{s.statusText}</span>
+          </div>
         </div>
       </header>
 

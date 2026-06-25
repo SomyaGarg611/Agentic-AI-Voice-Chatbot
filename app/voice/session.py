@@ -11,7 +11,7 @@ from app.config import settings
 from app.agent.loop import run_agent_streaming
 from app.voice.deepgram_stt import DeepgramSTT
 from app.voice.elevenlabs_tts import synthesize_sentence, clean_for_tts
-from app.memory.longterm import store_turn, retrieve_relevant, get_recent_turns
+from app.memory.longterm import store_turn, retrieve_relevant, get_recent_turns, load_history
 from app.observability.tracing import flush
 
 logger = logging.getLogger(__name__)
@@ -82,7 +82,22 @@ class VoiceSession:
     async def _handle_text_msg(self, msg: dict):
         kind = msg.get("type", "")
 
-        if kind == "transcript":
+        if kind == "session":
+            # Client selects which chat to use (new or resumed from history)
+            new_id = msg.get("session_id")
+            if new_id:
+                # Cancel anything in flight on the old chat
+                if self._turn_task and not self._turn_task.done():
+                    self._turn_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await self._turn_task
+                self.processing = False
+                self.session_id = new_id
+                self.conversation_history = await load_history(new_id)
+                logger.info("Switched to chat %s (%d prior messages)",
+                            new_id, len(self.conversation_history))
+
+        elif kind == "transcript":
             text = msg.get("text", "").strip()
             if text:
                 await self._start_turn(text)
@@ -144,7 +159,8 @@ class VoiceSession:
                     f"User: {t['user']}\nAria: {t['agent']}" for t in recent
                 )
 
-            started = {"audio": False}
+            # Track whether ElevenLabs actually produced audio this turn.
+            tts = {"bytes": 0, "started": False, "dead": False}
 
             async def on_tool(name: str):
                 with contextlib.suppress(Exception):
@@ -153,16 +169,27 @@ class VoiceSession:
             async def on_sentence(text: str):
                 # Stream the sentence to the UI immediately…
                 await self.ws.send_json({"type": "agent_delta", "text": text + " "})
-                # …then synthesize and stream its audio (overlaps with generation)
-                if settings.has_elevenlabs:
+                # …then synthesize its audio. Only emit audio_start/bytes if the TTS
+                # call actually returns audio, so a quota/API failure cleanly falls
+                # back to the browser voice instead of going silent.
+                if settings.has_elevenlabs and not tts["dead"]:
                     spoken = clean_for_tts(text)
                     if spoken.strip():
-                        if not started["audio"]:
-                            await self.ws.send_json({"type": "audio_start"})
-                            started["audio"] = True
                         audio = await synthesize_sentence(spoken)
                         if audio:
+                            if not tts["started"]:
+                                await self.ws.send_json({"type": "audio_start"})
+                                tts["started"] = True
                             await self.ws.send_bytes(audio)
+                            tts["bytes"] += len(audio)
+                        else:
+                            # First failure → stop retrying and tell the client once
+                            tts["dead"] = True
+                            with contextlib.suppress(Exception):
+                                await self.ws.send_json({
+                                    "type": "notice",
+                                    "message": "Premium voice unavailable — using browser voice",
+                                })
 
             response_text, updated_history = await run_agent_streaming(
                 user_text,
@@ -179,7 +206,9 @@ class VoiceSession:
             await self.ws.send_json({
                 "type": "agent_done",
                 "text": response_text,
-                "has_audio": settings.has_elevenlabs and bool(response_text),
+                # Only claim audio if ElevenLabs actually delivered some — otherwise
+                # the browser speaks the text via Web Speech API.
+                "has_audio": tts["bytes"] > 0,
             })
 
             await store_turn(self.session_id, user_text, response_text)
