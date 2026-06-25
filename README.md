@@ -46,11 +46,12 @@ FastAPI
 | **Agentic tool use** | Web search, URL fetch, document RAG, symbolic calculator — Claude decides which to chain |
 | **RAG** | Upload PDF, Word, Excel, PowerPoint, CSV, TXT, MD, or HTML; recursive token-aware chunking tuned to the embedder, tables chunked row-wise with headers preserved |
 | **Long-term memory** | Per-turn summaries stored in ChromaDB; top-k relevant memories retrieved and injected on every turn |
+| **Chat history** | Multiple conversations — start new chats, browse past ones in a sidebar, reopen any to continue with full context, or delete them |
 | **Barge-in** | User can interrupt mid-response; server cancels task and browser stops audio instantly |
 | **Sentence streaming** | TTS synthesised sentence-by-sentence — browser starts playing before generation finishes |
 | **Observability** | Langfuse 4.x traces every turn, Claude generation (with token counts), and each tool call |
 | **Eval suite** | LLM-as-judge eval harness scoring faithfulness, content match, and citation presence |
-| **Fallbacks** | Web Speech API for STT/TTS if Deepgram/ElevenLabs keys absent — zero-key local demo |
+| **Graceful fallback** | If Deepgram/ElevenLabs keys are absent *or* a provider fails at runtime (e.g. ElevenLabs quota), it auto-falls back to the browser's Web Speech API so STT/TTS keep working — never silent |
 
 ---
 
@@ -95,7 +96,7 @@ VoiceBot/
 │   │   ├── splitter.py          # Recursive token-aware text splitter
 │   │   └── ingest.py            # Orchestrates extract → split → index
 │   ├── memory/
-│   │   └── longterm.py          # Cross-session memory (SQLite + ChromaDB)
+│   │   └── longterm.py          # Memory + chat history (SQLite + ChromaDB)
 │   ├── voice/
 │   │   ├── session.py           # Per-connection orchestrator + barge-in
 │   │   ├── deepgram_stt.py      # Deepgram asyncwebsocket wrapper
@@ -105,8 +106,8 @@ VoiceBot/
 ├── frontend/                    # React + Vite UI (built to frontend/dist)
 │   ├── src/
 │   │   ├── App.jsx              # Layout: topbar, thread, orb, composer
-│   │   ├── useVoiceSession.js   # WebSocket + audio pipeline hook
-│   │   └── components/          # VoiceOrb, Message, Composer, Toasts
+│   │   ├── useVoiceSession.js   # WebSocket + audio pipeline + chat state hook
+│   │   └── components/          # VoiceOrb, Message, Composer, Toasts, Sidebar
 │   ├── public/pcm-processor.js  # AudioWorklet processor (mic → PCM-16)
 │   └── dist/                    # Built static assets (served by FastAPI)
 ├── web/                         # Legacy vanilla UI (no-build fallback)
@@ -180,6 +181,8 @@ All keys have **free tiers** sufficient for development and demos.
 | **Voice query** | Click the 🎤 mic button (wait for "Ready" status), then speak |
 | **Text query** | Type in the input box and press Enter |
 | **Upload a document** | Click 📄, choose a PDF, Word, Excel, PowerPoint, CSV, TXT, MD or HTML file — then ask about it |
+| **New chat** | Click ＋ (top-right) to start a fresh conversation |
+| **Chat history** | Click ☰ (top-left) to open the sidebar — reopen any past chat to continue it, or delete it |
 | **Stop mid-response** | Click the red ⏹ stop button or press **Escape** |
 | **Interrupt** | Just speak while Aria is responding — she stops and answers your new question |
 
@@ -216,6 +219,7 @@ This project was built to showcase real AI engineering skills:
 | **Agentic tool orchestration** | Multi-step Claude tool-calling loop with 4 tools, retry logic, citation extraction |
 | **Retrieval-Augmented Generation** | Multi-format extraction (PDF/Word/Excel/PPT/CSV/HTML), recursive token-aware chunking tuned to the embedder window, row-wise table chunking, cosine relevance scoring |
 | **Long-term memory** | Cross-session summarise-and-retrieve pattern (SQLite + vector store) |
+| **Session management** | Client-owned chat ids; resume any past conversation with full context reloaded server-side; graceful provider fallback |
 | **Real-time voice pipeline** | AudioWorklet PCM capture → Deepgram streaming STT → sentence-chunked TTS |
 | **Barge-in / interruption** | asyncio task cancellation + browser AudioBufferSourceNode stop |
 | **Observability** | Langfuse 4.x OTel-based tracing with token counts per generation |
