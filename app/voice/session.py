@@ -13,18 +13,21 @@ from app.voice.deepgram_stt import DeepgramSTT
 from app.voice.elevenlabs_tts import synthesize_sentence, clean_for_tts
 from app.memory.longterm import store_turn, retrieve_relevant, get_recent_turns, load_history
 from app.observability.tracing import flush
+from app.security import allow
 
 logger = logging.getLogger(__name__)
 
 
 class VoiceSession:
-    def __init__(self, ws: WebSocket):
+    def __init__(self, ws: WebSocket, user_id: str = "anon"):
         self.ws = ws
+        self.user_id = user_id
         self.session_id = str(uuid.uuid4())
         self.processing = False
         self.conversation_history: list = []
         self._stt: Optional[DeepgramSTT] = None
         self._turn_task: Optional[asyncio.Task] = None   # the current agent+TTS task
+        self._client_ip = ws.client.host if ws.client else "unknown"
 
     async def run(self):
         await self.ws.send_json({"type": "connected", "session_id": self.session_id})
@@ -93,7 +96,7 @@ class VoiceSession:
                         await self._turn_task
                 self.processing = False
                 self.session_id = new_id
-                self.conversation_history = await load_history(new_id)
+                self.conversation_history = await load_history(new_id, self.user_id)
                 logger.info("Switched to chat %s (%d prior messages)",
                             new_id, len(self.conversation_history))
 
@@ -132,6 +135,10 @@ class VoiceSession:
 
     async def _start_turn(self, user_text: str):
         """Cancel any in-flight turn (barge-in), then start a fresh one."""
+        if not allow(f"turns:{self._client_ip}", settings.max_turns_per_min):
+            with contextlib.suppress(Exception):
+                await self.ws.send_json({"type": "error", "message": "Rate limit reached — please wait a moment."})
+            return
         if self._turn_task and not self._turn_task.done():
             logger.info("Barge-in: cancelling current turn for new query")
             self._turn_task.cancel()
@@ -148,7 +155,7 @@ class VoiceSession:
         try:
             await self.ws.send_json({"type": "agent_thinking"})
 
-            memories = await retrieve_relevant(user_text)
+            memories = await retrieve_relevant(user_text, self.user_id)
             recent = await get_recent_turns(self.session_id, limit=3)
 
             memory_context = ""
@@ -211,7 +218,7 @@ class VoiceSession:
                 "has_audio": tts["bytes"] > 0,
             })
 
-            await store_turn(self.session_id, user_text, response_text)
+            await store_turn(self.user_id, self.session_id, user_text, response_text)
 
         except asyncio.CancelledError:
             # Barge-in: clean up and let the new turn take over

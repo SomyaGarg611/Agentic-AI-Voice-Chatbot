@@ -3,14 +3,16 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, File, UploadFile, WebSocket, HTTPException, Depends, Request, Body
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.rag.ingest import ingest_bytes
 from app.rag.store import get_store
 from app.memory.longterm import get_db
+from app.security import (
+    current_user, allow, issue_session_jwt, verify_google_id_token,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -37,18 +39,49 @@ app = FastAPI(title="VoiceBot — Agentic AI Research Analyst", lifespan=lifespa
 
 # ── WebSocket voice endpoint ────────────────────────────────────────────────
 
+# ── Auth ──────────────────────────────────────────────────────────────────────
+
+@app.post("/api/auth/google")
+async def auth_google(id_token: str = Body(..., embed=True)):
+    user = verify_google_id_token(id_token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Google sign-in failed")
+    return {"token": issue_session_jwt(user), "user": user}
+
+
+@app.post("/api/auth/dev")
+async def auth_dev(email: str = Body(..., embed=True)):
+    """Dev-only login used when Google isn't configured — never enabled if it is."""
+    if settings.has_google:
+        raise HTTPException(status_code=404, detail="Not available")
+    email = email.strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Enter a valid email")
+    user = {"sub": f"dev:{email}", "email": email, "name": email.split("@")[0], "picture": ""}
+    return {"token": issue_session_jwt(user), "user": user}
+
+
+# ── WebSocket voice endpoint ────────────────────────────────────────────────
+
 @app.websocket("/ws/voice")
 async def ws_voice(websocket: WebSocket):
     from app.voice.session import VoiceSession
+    from app.security import user_from_token
     await websocket.accept()
-    session = VoiceSession(websocket)
+    user = user_from_token(websocket.query_params.get("token"))
+    if not user:
+        await websocket.close(code=1008)  # not authenticated
+        return
+    session = VoiceSession(websocket, user_id=user["sub"])
     await session.run()
 
 
 # ── RAG document upload ─────────────────────────────────────────────────────
 
 @app.post("/api/ingest")
-async def ingest_document(file: UploadFile = File(...)):
+async def ingest_document(request: Request, file: UploadFile = File(...), user: dict = Depends(current_user)):
+    if not allow(f"ingest:{user['sub']}", settings.max_uploads_per_min):
+        raise HTTPException(status_code=429, detail="Too many uploads — slow down")
     data = await file.read()
     if len(data) > 10 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="File too large (max 10 MB)")
@@ -60,32 +93,41 @@ async def ingest_document(file: UploadFile = File(...)):
 
 
 @app.get("/api/rag/stats")
-async def rag_stats():
+async def rag_stats(user: dict = Depends(current_user)):
     return {"doc_chunks": get_store().count()}
 
 
-# ── Chat history ──────────────────────────────────────────────────────────────
+# ── Chat history (scoped to the signed-in user) ─────────────────────────────────
 
 @app.get("/api/chats")
-async def list_chats_endpoint():
+async def list_chats_endpoint(user: dict = Depends(current_user)):
     from app.memory.longterm import list_chats
-    return {"chats": await list_chats()}
+    return {"chats": await list_chats(user["sub"])}
 
 
 @app.get("/api/chats/{session_id}")
-async def get_chat_endpoint(session_id: str):
+async def get_chat_endpoint(session_id: str, user: dict = Depends(current_user)):
     from app.memory.longterm import get_chat_messages
-    return {"messages": await get_chat_messages(session_id)}
+    return {"messages": await get_chat_messages(session_id, user["sub"])}
 
 
 @app.delete("/api/chats/{session_id}")
-async def delete_chat_endpoint(session_id: str):
+async def delete_chat_endpoint(session_id: str, user: dict = Depends(current_user)):
     from app.memory.longterm import delete_chat
-    await delete_chat(session_id)
+    await delete_chat(session_id, user["sub"])
     return {"deleted": session_id}
 
 
-# ── Health check ────────────────────────────────────────────────────────────
+# ── Public config + health ────────────────────────────────────────────────────
+
+@app.get("/api/config")
+async def public_config():
+    """Unauthenticated — tells the frontend which sign-in method to show."""
+    return {
+        "google_client_id": settings.google_client_id or "",
+        "dev_login": not settings.has_google,
+    }
+
 
 @app.get("/api/health")
 async def health():

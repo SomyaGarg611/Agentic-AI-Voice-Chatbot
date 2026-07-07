@@ -5,6 +5,7 @@ import Message from './components/Message'
 import Composer from './components/Composer'
 import Toasts from './components/Toasts'
 import Sidebar from './components/Sidebar'
+import Login from './components/Login'
 
 const SUGGESTIONS = [
   "What's the latest on AI regulation?",
@@ -25,6 +26,8 @@ export default function App() {
   const connecting = s.phase === STATE.CONNECTING
 
   const openHistory = () => { s.loadChats(); setNavOpen(true) }
+
+  if (s.needAuth) return <Login config={s.authConfig} onGoogle={s.loginGoogle} onDev={s.loginDev} error={s.authError} />
 
   return (
     <div className="app">
@@ -55,6 +58,13 @@ export default function App() {
             <span className="pill__dot" />
             <span className="pill__text">{s.statusText}</span>
           </div>
+          {s.user && (
+            <button className="userchip" onClick={s.logout} title={`${s.user.email} — click to sign out`} aria-label="Sign out">
+              {s.user.picture
+                ? <img src={s.user.picture} alt="" referrerPolicy="no-referrer" />
+                : <span className="userchip__initial">{(s.user.name || s.user.email || '?')[0].toUpperCase()}</span>}
+            </button>
+          )}
         </div>
       </header>
 

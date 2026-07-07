@@ -33,10 +33,15 @@ export function useVoiceSession() {
   const [toasts, setToasts] = useState([])
   const [chats, setChats] = useState([])
   const [activeChatId, setActiveChatId] = useState(null)
+  const [needAuth, setNeedAuth] = useState(false)
+  const [authError, setAuthError] = useState('')
+  const [authConfig, setAuthConfig] = useState({ googleClientId: '', devLogin: true })
+  const [user, setUser] = useState(null)
 
   // refs (mutable, non-rendering)
   const ws = useRef(null)
   const activeChatRef = useRef(null)
+  const tokenRef = useRef(localStorage.getItem('voicebot_token') || '')
   const audioCtx = useRef(null)
   const workletNode = useRef(null)
   const mediaStream = useRef(null)
@@ -55,13 +60,20 @@ export function useVoiceSession() {
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), ttl)
   }, [])
 
+  // Attach the access token (if any) to API calls
+  const authFetch = useCallback((url, opts = {}) => {
+    const headers = { ...(opts.headers || {}) }
+    if (tokenRef.current) headers.Authorization = `Bearer ${tokenRef.current}`
+    return fetch(url, { ...opts, headers })
+  }, [])
+
   const refreshDocCount = useCallback(async () => {
     try {
-      const r = await fetch('/api/rag/stats')
+      const r = await authFetch('/api/rag/stats')
       const j = await r.json()
       setDocCount(j.doc_chunks || 0)
     } catch {}
-  }, [])
+  }, [authFetch])
 
   // ── Chat history ──────────────────────────────────────────────────
   const newId = () =>
@@ -75,11 +87,11 @@ export function useVoiceSession() {
 
   const loadChats = useCallback(async () => {
     try {
-      const r = await fetch('/api/chats')
+      const r = await authFetch('/api/chats')
       const j = await r.json()
       setChats(j.chats || [])
     } catch {}
-  }, [])
+  }, [authFetch])
 
   const newChat = useCallback(() => {
     const id = newId()
@@ -94,7 +106,7 @@ export function useVoiceSession() {
 
   const openChat = useCallback(async (id) => {
     try {
-      const r = await fetch(`/api/chats/${id}`)
+      const r = await authFetch(`/api/chats/${id}`)
       const j = await r.json()
       const msgs = (j.messages || []).map((m, i) => ({ id: `h${i}`, role: m.role, text: m.text }))
       activeChatRef.current = id
@@ -109,11 +121,11 @@ export function useVoiceSession() {
 
   const deleteChat = useCallback(async (id) => {
     try {
-      await fetch(`/api/chats/${id}`, { method: 'DELETE' })
+      await authFetch(`/api/chats/${id}`, { method: 'DELETE' })
       await loadChats()
       if (id === activeChatRef.current) newChat()
     } catch {}
-  }, [loadChats, newChat])
+  }, [authFetch, loadChats, newChat])
 
   // ── Audio playback ────────────────────────────────────────────────
   const getAudioCtx = useCallback(() => {
@@ -233,7 +245,8 @@ export function useVoiceSession() {
   const connect = useCallback(() => {
     setPhase(STATE.CONNECTING)
     setStatusText('Connecting')
-    const socket = new WebSocket(WS_URL)
+    const url = tokenRef.current ? `${WS_URL}?token=${encodeURIComponent(tokenRef.current)}` : WS_URL
+    const socket = new WebSocket(url)
     socket.binaryType = 'arraybuffer'
     ws.current = socket
 
@@ -317,14 +330,79 @@ export function useVoiceSession() {
     }
   }, [playChunk, pushMessage, showPending, updatePending, removePending, appendLive, speakBrowser, stopAllAudio, checkPlaybackDone, addToast, sendSession, loadChats])
 
-  useEffect(() => {
-    // Start on a fresh chat; load history list for the sidebar
-    const id = newId()
-    activeChatRef.current = id
-    setActiveChatId(id)
+  // Bring the app online once the user is signed in
+  const startApp = useCallback(() => {
+    setNeedAuth(false)
     loadChats()
     connect()
     refreshDocCount()
+  }, [loadChats, connect, refreshDocCount])
+
+  const _completeLogin = useCallback((path, body) => {
+    setAuthError('')
+    return fetch(path, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }).then(async (r) => {
+      const j = await r.json().catch(() => ({}))
+      if (r.ok && j.token) {
+        tokenRef.current = j.token
+        localStorage.setItem('voicebot_token', j.token)
+        localStorage.setItem('voicebot_user', JSON.stringify(j.user))
+        setUser(j.user)
+        // Wipe any previous user's state before showing the new account
+        const id = newId()
+        activeChatRef.current = id
+        setActiveChatId(id)
+        setMessages([])
+        setChats([])
+        setTranscript('')
+        pendingId.current = null
+        liveId.current = null
+        startApp()
+      } else {
+        setAuthError(j.detail || 'Sign-in failed')
+      }
+    }).catch(() => setAuthError('Sign-in failed'))
+  }, [startApp])
+
+  const loginGoogle = useCallback((idToken) => _completeLogin('/api/auth/google', { id_token: idToken }), [_completeLogin])
+  const loginDev = useCallback((email) => _completeLogin('/api/auth/dev', { email }), [_completeLogin])
+
+  const logout = useCallback(() => {
+    localStorage.removeItem('voicebot_token')
+    localStorage.removeItem('voicebot_user')
+    tokenRef.current = ''
+    setUser(null)
+    try { ws.current?.close() } catch {}
+    setMessages([])
+    setChats([])
+    setTranscript('')
+    pendingId.current = null
+    liveId.current = null
+    setNeedAuth(true)
+  }, [])
+
+  useEffect(() => {
+    // Start on a fresh chat
+    const id = newId()
+    activeChatRef.current = id
+    setActiveChatId(id)
+    ;(async () => {
+      let cfg = { google_client_id: '', dev_login: true }
+      try { cfg = await (await fetch('/api/config')).json() } catch {}
+      setAuthConfig({ googleClientId: cfg.google_client_id || '', devLogin: !!cfg.dev_login })
+      // Resume an existing session if the stored JWT is still valid
+      if (tokenRef.current) {
+        const r = await authFetch('/api/chats')
+        if (r.ok) {
+          try { setUser(JSON.parse(localStorage.getItem('voicebot_user') || 'null')) } catch {}
+          startApp()
+          return
+        }
+        localStorage.removeItem('voicebot_token'); tokenRef.current = ''
+      }
+      setNeedAuth(true)
+    })()
     // Unlock audio playback on the first user interaction anywhere on the page
     const unlock = () => primeAudio()
     window.addEventListener('pointerdown', unlock)
@@ -441,7 +519,7 @@ export function useVoiceSession() {
     const fd = new FormData()
     fd.append('file', file)
     try {
-      const r = await fetch('/api/ingest', { method: 'POST', body: fd })
+      const r = await authFetch('/api/ingest', { method: 'POST', body: fd })
       const j = await r.json()
       if (r.ok) {
         addToast('success', `${file.name} indexed — ${j.chunks_indexed} chunks`)
@@ -452,7 +530,7 @@ export function useVoiceSession() {
     } catch (e) {
       addToast('error', `Upload error: ${e.message}`)
     }
-  }, [addToast, refreshDocCount])
+  }, [authFetch, addToast, refreshDocCount])
 
   const stopAgent = useCallback(() => {
     stopAllAudio()
@@ -476,6 +554,7 @@ export function useVoiceSession() {
     phase, statusText, messages, transcript, isListening, isBusy,
     sttProvider, docCount, toasts,
     chats, activeChatId, loadChats, newChat, openChat, deleteChat,
+    needAuth, authError, authConfig, user, loginGoogle, loginDev, logout,
     toggleMic, sendText, uploadFile, stopAgent,
   }
 }

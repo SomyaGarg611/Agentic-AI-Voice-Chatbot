@@ -414,6 +414,54 @@ body {
 .toast--error svg { color: var(--danger); }
 .toast--info svg  { color: var(--think); }
 
+/* ── Login gate ─────────────────────────────────────────────────── */
+.login { min-height: 100dvh; display: grid; place-items: center; padding: 20px; }
+.login__card {
+  width: 100%; max-width: 340px;
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-lg); padding: 34px 28px;
+}
+.login__mark {
+  width: 40px; height: 40px; border-radius: 12px; margin-bottom: 14px;
+  background: conic-gradient(from 130deg, var(--listen), var(--think), var(--speak), var(--listen));
+  box-shadow: 0 0 26px rgba(139,124,246,0.4);
+}
+.login__title { font-family: var(--font-display); font-weight: 700; font-size: 24px; letter-spacing: -0.5px; }
+.login__sub { color: var(--muted); font-size: 14px; margin: 6px 0 20px; }
+.login form { width: 100%; display: flex; flex-direction: column; gap: 12px; }
+.login__input {
+  width: 100%; padding: 12px 14px;
+  background: var(--surface2); border: 1px solid var(--line-2); border-radius: var(--r);
+  color: var(--text); font-family: var(--font-body); font-size: 15px; outline: none;
+}
+.login__input:focus { border-color: var(--think); }
+.login__error { color: var(--danger); font-size: 13px; margin-top: 4px; }
+.login__hint { color: var(--faint); font-size: 11px; text-align: center; }
+.login__google { display: flex; justify-content: center; min-height: 40px; }
+.login__card > .login__google { margin-bottom: 4px; }
+.login__card form { margin-top: 4px; }
+
+/* user chip in topbar */
+.userchip {
+  width: 30px; height: 30px; border-radius: 50%; padding: 0; overflow: hidden;
+  border: 1px solid var(--line-2); background: var(--surface2); cursor: pointer;
+  display: grid; place-items: center; flex-shrink: 0;
+  transition: border-color .15s var(--ease), transform .12s var(--ease);
+}
+.userchip:hover { border-color: var(--think); }
+.userchip:active { transform: scale(.92); }
+.userchip img { width: 100%; height: 100%; object-fit: cover; }
+.userchip__initial { font-family: var(--font-display); font-weight: 600; font-size: 13px; color: var(--think); }
+.login__btn {
+  width: 100%; padding: 12px;
+  background: var(--think); color: #fff; border: none; border-radius: var(--r);
+  font-family: var(--font-body); font-size: 15px; font-weight: 500; cursor: pointer;
+  transition: opacity .15s var(--ease);
+}
+.login__btn:disabled { opacity: .4; cursor: default; }
+.login__btn:not(:disabled):hover { opacity: .9; }
+
 /* ── Responsive ─────────────────────────────────────────────────── */
 @media (max-width: 620px) {
   .app { border-inline: none; }
